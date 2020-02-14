@@ -136,6 +136,30 @@ func init() {
 	registerFunction(0x16, BuildXSFunc)
 	registerFunction(0x26, BuildXTSFunc)
 	registerFunction(0x56, BuildXWFunc)
+	registerFunction(0x85, BuildRLSFunc)
+	registerFunction(0x87, BuildRLDFunc)
+	registerFunction(0x84, BuildRRSFunc)
+	registerFunction(0x86, BuildRRDFunc)
+	registerFunction(0x89, BuildSLAFunc)
+	registerFunction(0x8b, BuildSLDAFunc)
+	registerFunction(0x8d, BuildSLLFunc)
+	registerFunction(0x8f, BuildSLDLFunc)
+	registerFunction(0x88, BuildSRAFunc)
+	registerFunction(0x8a, BuildSRDAFunc)
+	registerFunction(0x8c, BuildSRLFunc)
+	registerFunction(0x8e, BuildSRDLFunc)
+	// registerFunction(0xc0, BuildCPFunc)a
+	registerFunction(0xc1, BuildEXFunc)
+	registerFunction(0x05, BuildJCFunc)
+	registerFunction(0x02, BuildJOSFunc)
+	registerFunction(0x03, BuildJTSFunc)
+	registerFunction(0x04, BuildJOAFunc)
+	registerFunction(0x01, BuildJSFunc)
+	// registerFunction(0x06, BuildJSPFunc)
+	// registerFunction(0c3, BuildLSKFunc)
+	// registerFunction(0c2, BuildLSPFunc)
+	registerFunction(0x00, BuildNOPFunc)
+	// registerFunction(0x08, BuildSTSRFunc)
 }
 
 func NewCPU() *CPU {
@@ -1253,7 +1277,7 @@ func (i SLDA) Execute(c *CPU) uint32 {
 	return c.IC + 2
 	
 }
-func BuildSLDA(op, r, ix uint8, as uint16) Instruction {
+func BuildSLDAFunc(op, r, ix uint8, as uint16) Instruction {
 	return SLDA(buildType1(op, r, ix, as))
 }
 
@@ -1264,7 +1288,7 @@ func (i SLL) Execute(c *CPU) uint32 {
 	c.G[i.r] = r << 1
 	return c.IC + 2
 }
-func BuildSLL(op, r, ix uint8, as uint16) Instruction {
+func BuildSLLFunc(op, r, ix uint8, as uint16) Instruction {
 	return SLL(buildType1(op, r, ix, as))
 }
 
@@ -1288,6 +1312,9 @@ func (i SRA) Execute(c *CPU) uint32 {
 	c.G[i.r] = (r & 0x80000000) | (r >> 1)
 	return c.IC + 2
 }
+func BuildSRAFunc(op, r, ix uint8, as uint16) Instruction {
+	return SRA(buildType1(op, r, ix, as))
+}
 
 // SRDA
 type SRDA type1
@@ -1309,7 +1336,7 @@ func (i SRL) Execute(c *CPU) uint32 {
 	c.G[i.r] = c.G[i.r] >> 1
 	return c.IC + 2
 }
-func BuildSRL(op, r, ix uint8, as uint16) Instruction {
+func BuildSRLFunc(op, r, ix uint8, as uint16) Instruction {
 	return SRL(buildType1(op, r, ix, as))
 }
 
@@ -1405,6 +1432,12 @@ func BuildJSFunc(op, r, ix uint8, as uint16) Instruction {
 	return JS(buildType1(op, r, ix, as))
 }
 
+// JSP
+
+// LSK
+
+// LPC
+
 // NOP
 type NOP type1
 func (i NOP) Execute(c *CPU) uint32 {
@@ -1413,3 +1446,5 @@ func (i NOP) Execute(c *CPU) uint32 {
 func BuildNOPFunc(op, r, ix uint8, as uint16) Instruction {
 	return NOP(buildType1(op, r, ix, as))
 }
+
+// STSR
