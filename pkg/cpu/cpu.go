@@ -206,18 +206,24 @@ func (c *CPU) setCC(opType int, value uint32) {
 // 32-bit unit and mask it to fit within the available address space.
 func (c *CPU) computeEffective(addr uint16, indirect bool, ixReg uint8) uint32 {
 	rv := uint32(addr)
+	fmt.Printf("DEBUG: rv is %x, indirect is %v, ixreg is %d\n", rv, indirect, ixReg)
 
-	if (ixReg >= 1) && (ixReg <= 7) {
-		rv += c.G[ixReg]
-	}
-
+	rv = rv + c.IC
 	rv = rv & 0x03FFFF
+	fmt.Printf("DEBUG: rv+IC is %x\n", rv)
 
 	if indirect {
 		rv = c.FetchWord(rv)
-	} else {
-		rv = rv + c.IC
+		rv = rv & 0x03FFFF
+		fmt.Printf("DEBUG: post-indirect, rv is %x\n", rv)
 	}
+	
+	if (ixReg >= 1) && (ixReg <= 7) {
+		rv += c.G[ixReg]
+		rv = rv & 0x03FFFF
+		fmt.Printf("DEBUG: post-index, rv is %x\n", rv)
+	}
+	
 	rv = rv & 0x03FFFF
 
 	return rv

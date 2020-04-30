@@ -4,6 +4,44 @@ import (
 	"testing"
 )
 
+func TestComputeEffective(t *testing.T) {
+	var dm MemoryBackend
+	var cases = []struct {
+		addr     uint16
+		indirect bool
+		ixReg    uint8
+		expected uint32
+	}{
+		{0, false, 0, 0},
+		{0, false, 1, 0x10},
+		{0, true, 1, 0x1244},
+		{2, false, 0, 2},
+		{2, false, 1, 0x12},
+		{2, true, 1, 0x0010},
+	}
+
+	cpu := NewCPU()
+	cpu.G[1] = 0x10
+	dm = NewDirectMemory(16)
+	mr := MemoryRange{Low: 0, High: 15}
+	cpu.RegisterMemory(mr, dm)
+	cpu.StoreWord(0, 0x1234)
+
+	expected := uint32(0x00001234)
+	seen := cpu.FetchWord(0)
+	if seen != expected {
+		t.Errorf("Memory has wrong value, saw %x expected %x", seen, expected)
+	}
+	for ix, c := range cases {
+		cpu.IC = 0
+		expected := c.expected
+		seen := cpu.computeEffective(c.addr, c.indirect, c.ixReg)
+		if seen != expected {
+			t.Errorf("Case #%d, saw address %x, expeced %x", ix, seen, expected)
+		}
+	}
+}
+
 func TestDirectMemory(t *testing.T) {
 	var dm MemoryBackend
 	c := NewCPU()
