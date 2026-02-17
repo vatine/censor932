@@ -1,8 +1,9 @@
 package shared
+
 // A memory backend designed to be attached to multiple CPUs a the same time.
 
 import (
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 type op interface {
@@ -15,7 +16,7 @@ type SharedMemory struct {
 
 type sharedMemoryBackend struct {
 	memory []uint16
-	cmd chan op
+	cmd    chan op
 }
 
 type setHalfWord struct {
@@ -40,52 +41,51 @@ type getWord struct {
 	ret  chan uint32
 }
 
-
 func (c getWord) execute(b *sharedMemoryBackend) {
-	fields := logrus.Fields{
+	fields := log.Fields{
 		"addr": c.addr,
-		"op": "get",
+		"op":   "get",
 	}
-	logrus.WithFields(fields).Info("get value")
+	log.WithFields(fields).Debug("get value")
 	h0 := uint32(b.memory[c.addr])
-	h1 := uint32(b.memory[c.addr + 1])
+	h1 := uint32(b.memory[c.addr+1])
 
 	c.ret <- ((h0 << 16) | h1)
 }
 
 func (c setWord) execute(b *sharedMemoryBackend) {
-	fields := logrus.Fields{
-		"addr": c.addr,
+	fields := log.Fields{
+		"addr":  c.addr,
 		"value": c.value,
-		"op": "set",
+		"op":    "set",
 	}
-	logrus.WithFields(fields).Info("set value")
+	log.WithFields(fields).Debug("set value")
 	h0 := uint32(b.memory[c.addr])
-	h1 := uint32(b.memory[c.addr + 1])
+	h1 := uint32(b.memory[c.addr+1])
 
 	rv := (h0 << 16) | h1
 	b.memory[c.addr] = uint16((c.value & 0xffff0000) >> 16)
-	b.memory[c.addr + 1] = uint16(c.value & 0xffff)
+	b.memory[c.addr+1] = uint16(c.value & 0xffff)
 
 	c.ret <- rv
 }
 
 func (c getHalfWord) execute(b *sharedMemoryBackend) {
-	fields := logrus.Fields{
+	fields := log.Fields{
 		"addr": c.addr,
-		"op": "getHalf",
+		"op":   "getHalf",
 	}
-	logrus.WithFields(fields).Info("get value")
+	log.WithFields(fields).Debug("get value")
 	c.ret <- b.memory[c.addr]
 }
 
-func (c setHalfWord) execute (b *sharedMemoryBackend) {
-	fields := logrus.Fields{
-		"addr": c.addr,
+func (c setHalfWord) execute(b *sharedMemoryBackend) {
+	fields := log.Fields{
+		"addr":  c.addr,
 		"value": c.value,
-		"op": "setHalf",
+		"op":    "setHalf",
 	}
-	logrus.WithFields(fields).Info("set value")
+	log.WithFields(fields).Debug("set value")
 	rv := b.memory[c.addr]
 	b.memory[c.addr] = c.value
 	c.ret <- rv
@@ -107,57 +107,57 @@ func NewSharedMemory(size uint32) SharedMemory {
 }
 
 func (s SharedMemory) FetchHalfWord(addr uint32) uint16 {
-	fields := logrus.Fields{
-		"op": "FetchHalfWord",
+	fields := log.Fields{
+		"op":   "FetchHalfWord",
 		"addr": addr,
 	}
-	logrus.WithFields(fields).Info("thing")
+	log.WithFields(fields).Debug("thing")
 	c := make(chan uint16)
 	op := getHalfWord{addr: addr, ret: c}
 	s.cmd <- op
-	rv := <- c
+	rv := <-c
 	close(c)
 	return rv
 }
 
 func (s SharedMemory) FetchWord(addr uint32) uint32 {
-	fields := logrus.Fields{
-		"op": "FetchWord",
+	fields := log.Fields{
+		"op":   "FetchWord",
 		"addr": addr,
 	}
-	logrus.WithFields(fields).Info("thing")
+	log.WithFields(fields).Debug("thing")
 	c := make(chan uint32)
 	op := getWord{addr: addr, ret: c}
 	s.cmd <- op
-	rv := <- c
+	rv := <-c
 	close(c)
 	return rv
 }
 
 func (s SharedMemory) WriteHalfWord(addr uint32, data uint16) uint16 {
-	fields := logrus.Fields{
-		"op": "WriteHalfWord",
+	fields := log.Fields{
+		"op":   "WriteHalfWord",
 		"addr": addr,
 	}
-	logrus.WithFields(fields).Info("thing")
+	log.WithFields(fields).Debug("thing")
 	c := make(chan uint16)
 	op := setHalfWord{addr: addr, value: data, ret: c}
 	s.cmd <- op
-	rv := <- c
+	rv := <-c
 	close(c)
 	return rv
 }
 
 func (s SharedMemory) WriteWord(addr uint32, data uint32) uint32 {
 	c := make(chan uint32)
-	fields := logrus.Fields{
-		"op": "c",
+	fields := log.Fields{
+		"op":   "c",
 		"addr": addr,
 	}
-	logrus.WithFields(fields).Info("thing")
+	log.WithFields(fields).Debug("thing")
 	op := setWord{addr: addr, value: data, ret: c}
 	s.cmd <- op
-	rv := <- c
+	rv := <-c
 	close(c)
 	return rv
 }
