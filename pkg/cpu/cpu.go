@@ -1,7 +1,8 @@
 // The Censor 932 CPU package.
 //
 // After the machine description at:
-//   http://www.veteranklubbenalfa.se/veteran/13q1/130215.pdf
+//
+//	http://www.veteranklubbenalfa.se/veteran/13q1/130215.pdf
 //
 // The cpu package includes instructions, instruction decoding, memory
 // interfaces, etc.
@@ -9,8 +10,12 @@ package cpu
 
 import (
 	"fmt"
-	
-	"github.com/sirupsen/logrus"
+
+	log "github.com/sirupsen/logrus"
+)
+
+const (
+	mask = 0x03FFFF
 )
 
 // A struct providing upper and lower bounds for a MemoryBackend
@@ -42,9 +47,9 @@ type MemoryPlugin struct {
 // Basic CPU data structure
 type CPU struct {
 	G      [16]uint32
-	IC     uint32 		// This is technically an 18-bit entity
+	IC     uint32 // This is technically an 18-bit entity
 	PS     uint64
-	MIR    uint32		// Actually a 24-bit entity
+	MIR    uint32 // Actually a 24-bit entity
 	Memory []MemoryPlugin
 	CC     uint8
 }
@@ -63,7 +68,7 @@ func extractLowerWord(w uint64) uint32 {
 
 // General Instruction abstraction
 type Instruction interface {
-	Execute(*CPU) uint32	// Return the next IC
+	Execute(*CPU) uint32 // Return the next IC
 }
 
 type InstructionBuilder func(op uint8, r1, r2 uint8, rest uint16) Instruction
@@ -77,7 +82,7 @@ func registerFunction(opcode uint8, builder InstructionBuilder) {
 
 func init() {
 	instructionTable = map[uint8]InstructionBuilder{}
-	
+
 	registerFunction(0x4e, BuildIHFunc)
 	registerFunction(0x5e, BuildIWFunc)
 	registerFunction(0xcd, BuildLDFunc)
@@ -191,7 +196,7 @@ func (c *CPU) setCC(opType int, value uint32) {
 		switch {
 		case value == 0:
 			c.CC = 0
-		case value & 0xf0000000 == 0:
+		case value&0xf0000000 == 0:
 			c.CC = 2
 		default:
 			c.CC = 3
@@ -206,38 +211,44 @@ func (c *CPU) setCC(opType int, value uint32) {
 // 32-bit unit and mask it to fit within the available address space.
 func (c *CPU) computeEffective(addr uint16, indirect bool, ixReg uint8) uint32 {
 	rv := uint32(addr)
-	fmt.Printf("DEBUG: rv is %x, indirect is %v, ixreg is %d\n", rv, indirect, ixReg)
+	log.WithFields(log.Fields{
+		"rv":       rv,
+		"indirect": indirect,
+		"ixReg":    ixReg,
+	}).Debug("computeEffective inputs")
 
 	rv = rv + c.IC
-	rv = rv & 0x03FFFF
-	fmt.Printf("DEBUG: rv+IC is %x\n", rv)
+	rv = rv & mask
 
 	if indirect {
 		rv = c.FetchWord(rv)
-		rv = rv & 0x03FFFF
-		fmt.Printf("DEBUG: post-indirect, rv is %x\n", rv)
+		rv = rv & mask
 	}
-	
+
 	if (ixReg >= 1) && (ixReg <= 7) {
 		rv += c.G[ixReg]
-		rv = rv & 0x03FFFF
-		fmt.Printf("DEBUG: post-index, rv is %x\n", rv)
+		rv = rv & mask
 	}
-	
-	rv = rv & 0x03FFFF
+
+	rv = rv & mask
+	log.WithFields(log.Fields{
+		"rv":       rv,
+		"indirect": indirect,
+		"ixReg":    ixReg,
+	}).Debug("computeEffective outputs")
 
 	return rv
 }
 
 func decodeWord(word uint32) Instruction {
-	fields := logrus.Fields{
+	fields := log.Fields{
 		"word": word,
 	}
 	opCode := uint8((word & 0xFF000000) >> 24)
 	builder, ok := instructionTable[opCode]
 	if !ok {
-		logrus.WithFields(fields).Errorf("Non-existent instruction, %02x", opCode)
-		return BuildNOPFunc(0,0,0,0)
+		log.WithFields(fields).Errorf("Non-existent instruction, %02x", opCode)
+		return BuildNOPFunc(0, 0, 0, 0)
 	}
 
 	r1 := uint8((word & 0x00f00000) >> 20)
@@ -249,12 +260,11 @@ func decodeWord(word uint32) Instruction {
 
 // Make the CPU take another "step" (this is a fetch, execute, optionally stop)
 func (c *CPU) Step() {
-	fields := logrus.Fields{
+	fields := log.Fields{
 		"IC": c.IC,
 	}
-	logrus.WithFields(fields).Debug("CPU Step")
+	log.WithFields(fields).Debug("CPU Step")
 	word := c.FetchWord(c.IC)
-
 
 	c.IC = decodeWord(word).Execute(c)
 }
@@ -316,7 +326,7 @@ type DirectMemory struct {
 
 func (m *DirectMemory) FetchWord(address uint32) uint32 {
 	w1 := uint32(m.memory[address])
-	w2 := uint32(m.memory[address + 1])
+	w2 := uint32(m.memory[address+1])
 	return (w1 << 16) | w2
 }
 
@@ -333,7 +343,7 @@ func (m *DirectMemory) WriteHalfWord(address uint32, data uint16) uint16 {
 func (m *DirectMemory) WriteWord(address, data uint32) uint32 {
 	old := m.FetchWord(address)
 	m.memory[address] = uint16((data & 0xffff0000) >> 16)
-	m.memory[address + 1] = uint16(data & 0xffff)
+	m.memory[address+1] = uint16(data & 0xffff)
 	return old
 }
 
@@ -393,12 +403,13 @@ func buildType3(op, r1, r2 uint8, d uint16) type3 {
 		op: op,
 		r1: r1,
 		r2: r2,
-		d: d,
+		d:  d,
 	}
 }
 
 // Interchange full word
 type IW type1
+
 func (i IW) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, i.i, i.x)
 
@@ -412,10 +423,11 @@ func BuildIWFunc(op uint8, r1, r2 uint8, rest uint16) Instruction {
 
 // Interchange half word
 type IH type1
+
 func (i IH) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, i.i, i.x)
 
-	c.G[i.r] = uint32(c.StoreHalfWord(target, uint16(c.G[i.r] & 0x0000ffff)))
+	c.G[i.r] = uint32(c.StoreHalfWord(target, uint16(c.G[i.r]&0x0000ffff)))
 
 	return c.IC + 2
 }
@@ -423,9 +435,9 @@ func BuildIHFunc(op uint8, r1, r2 uint8, rest uint16) Instruction {
 	return IH(buildType1(op, r1, r2, rest))
 }
 
-
 // Load Complement
 type LC type1
+
 func (i LC) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	tmp := c.FetchWord(source)
@@ -442,7 +454,8 @@ func BuildLCFunc(op uint8, r1, r2 uint8, rest uint16) Instruction {
 
 // Load Direct
 type LD type3
-func (i LD) Execute (c *CPU) uint32 {
+
+func (i LD) Execute(c *CPU) uint32 {
 	c.G[i.r1] = uint32(i.d)
 
 	return c.IC + 2
@@ -451,14 +464,14 @@ func BuildLDFunc(op, r1, r2 uint8, rest uint16) Instruction {
 	return LD(buildType3(op, r1, r2, rest))
 }
 
-
 // Load Double Word
 type LDW type1
-func (i LDW) Execute (c *CPU) uint32 {
+
+func (i LDW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	c.G[i.r] = c.FetchWord(source)
-	source = c.computeEffective(i.as + 2, i.i, i.x)
-	c.G[i.r + 1] = c.FetchWord(source)
+	source = c.computeEffective(i.as+2, i.i, i.x)
+	c.G[i.r+1] = c.FetchWord(source)
 
 	return c.IC + 2
 }
@@ -466,9 +479,9 @@ func BuildLDWFunc(op, r1, r2 uint8, rest uint16) Instruction {
 	return LDW(buildType1(op, r1, r2, rest))
 }
 
-
 // Load Half Word
 type LH type1
+
 func (i LH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	c.G[i.r] = uint32(c.FetchHalfWord(source))
@@ -481,6 +494,7 @@ func BuildLHFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // Load Negative
 type LN type1
+
 func (i LN) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	tmp := c.FetchWord(source)
@@ -497,11 +511,11 @@ func BuildLNFunc(op uint8, r1, r2 uint8, rest uint16) Instruction {
 	return LN(buildType1(op, r1, r2, rest))
 }
 
-
 // LOC
 // LOU
 // LP
 type LP type1
+
 func (i LP) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	tmp := c.FetchWord(source)
@@ -520,10 +534,11 @@ func BuildLPFunc(op uint8, r1, r2 uint8, rest uint16) Instruction {
 
 // LRS
 type LRS type2
+
 func (i LRS) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, false, 0)
 	c.G[i.r1] = c.FetchWord(source)
-	source = c.computeEffective(i.as + 2, false, 0)
+	source = c.computeEffective(i.as+2, false, 0)
 	c.G[i.r2] = c.FetchWord(source)
 
 	return c.IC + 2
@@ -534,6 +549,7 @@ func BuildLRSFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // LT
 type LT type1
+
 func (i LT) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	tmp := c.FetchWord(source)
@@ -548,6 +564,7 @@ func BuildLTFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // LW
 type LW type1
+
 func (i LW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	c.G[i.r] = c.FetchWord(source)
@@ -560,6 +577,7 @@ func BuildLWFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // RZH
 type RZH type1
+
 func (i RZH) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, i.i, i.x)
 	c.StoreHalfWord(target, 0)
@@ -571,6 +589,7 @@ func BuildRZHFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // RZW
 type RZW type1
+
 func (i RZW) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, i.i, i.x)
 	c.StoreWord(target, 0)
@@ -584,12 +603,13 @@ func BuildRZWFunc(op, r1, r2 uint8, rest uint16) Instruction {
 // SIU
 // SRS
 type SRS type2
+
 func (i SRS) Execute(c *CPU) uint32 {
 	extra := uint16(0)
 	for r := i.r1; r <= i.r2; r++ {
-		target := c.computeEffective(i.as + extra, false, 0)
+		target := c.computeEffective(i.as+extra, false, 0)
 		c.StoreWord(target, c.G[r])
-		extra += 2 
+		extra += 2
 	}
 	return c.IC + 2
 }
@@ -599,10 +619,11 @@ func BuildSRSFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // STDW
 type STDW type1
+
 func (i STDW) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, i.i, i.x)
 	c.StoreWord(target, c.G[i.r])
-	target = c.computeEffective(i.as + 2, i.i, i.x)
+	target = c.computeEffective(i.as+2, i.i, i.x)
 	c.StoreWord(target, c.G[i.r+1])
 
 	return c.IC + 2
@@ -613,9 +634,10 @@ func BuildSTDWFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // STH
 type STH type1
+
 func (i STH) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, i.i, i.x)
-	c.StoreHalfWord(target, uint16(c.G[i.r] & 0xffff))
+	c.StoreHalfWord(target, uint16(c.G[i.r]&0xffff))
 
 	return c.IC + 2
 }
@@ -625,6 +647,7 @@ func BuildSTHFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // STW
 type STW type1
+
 func (i STW) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, i.i, i.x)
 	c.StoreWord(target, c.G[i.r])
@@ -637,6 +660,7 @@ func BuildSTWFunc(op, r1, r2 uint8, rest uint16) Instruction {
 
 // AD
 type AD type3
+
 func (i AD) Execute(c *CPU) uint32 {
 	c.G[i.r1] = c.G[i.r2] + uint32(i.d)
 	c.setCC(1, c.G[i.r1])
@@ -649,14 +673,15 @@ func BuildADFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // ADW
 type ADW type1
+
 func (i ADW) Execute(c *CPU) uint32 {
 	tmp0 := c.G[i.r]
-	tmp1 := c.G[i.r + 1]
+	tmp1 := c.G[i.r+1]
 
-	source := c.computeEffective(i.as + 2, i.i, i.x)
+	source := c.computeEffective(i.as+2, i.i, i.x)
 	tmp1 = tmp1 + c.FetchWord(source)
 	var carry uint32
-	if tmp1 < c.G[i.r + 1] {
+	if tmp1 < c.G[i.r+1] {
 		carry = 1
 	}
 	source = c.computeEffective(i.as, i.i, i.x)
@@ -668,7 +693,7 @@ func (i ADW) Execute(c *CPU) uint32 {
 		c.setCC(1, tmp0)
 	}
 	c.G[i.r] = tmp0
-	c.G[i.r + 1] = tmp1
+	c.G[i.r+1] = tmp1
 
 	return c.IC + 2
 }
@@ -678,6 +703,7 @@ func BuildADWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // AH
 type AH type1
+
 func (i AH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	result := c.G[i.r] + uint32(c.FetchHalfWord(source))
@@ -692,6 +718,7 @@ func BuildAHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // AS
 type AS type2
+
 func (i AS) Execute(c *CPU) uint32 {
 	sum := c.G[i.r1] + c.G[i.r2]
 	target := c.computeEffective(i.as, false, 0)
@@ -706,6 +733,7 @@ func BuildASFunc(op, r1, r2 uint8, as uint16) Instruction {
 
 // ATS
 type ATS type1
+
 func (i ATS) Execute(c *CPU) uint32 {
 	effective := c.computeEffective(i.as, i.i, i.x)
 	sum := c.FetchWord(effective) + c.G[i.r]
@@ -719,6 +747,7 @@ func BuildATSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // AW
 type AW type1
+
 func (i AW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	sum := c.G[i.r] + c.FetchWord(source)
@@ -730,11 +759,11 @@ func BuildAWFunc(op, r, ix uint8, as uint16) Instruction {
 	return AW(buildType1(op, r, ix, as))
 }
 
-
 // CD
 type CD type3
+
 func (i CD) Execute(c *CPU) uint32 {
-	c.setCC(3, c.G[i.r2] - uint32(i.d))
+	c.setCC(3, c.G[i.r2]-uint32(i.d))
 	return c.IC + 2
 }
 func BuildCDFunc(op, r1, r2 uint8, d uint16) Instruction {
@@ -743,10 +772,11 @@ func BuildCDFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // CH
 type CH type1
+
 func (i CH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	contents := uint32(c.FetchHalfWord(source))
-	c.setCC(2, c.G[i.r] - contents)
+	c.setCC(2, c.G[i.r]-contents)
 
 	return c.IC + 2
 }
@@ -756,10 +786,11 @@ func BuildCHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // CW
 type CW type1
+
 func (i CW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	contents := c.FetchWord(source)
-	c.setCC(2, c.G[i.r] - contents)
+	c.setCC(2, c.G[i.r]-contents)
 
 	return c.IC + 2
 }
@@ -769,6 +800,7 @@ func BuildCWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // DD
 type DD type3
+
 func (i DD) Execute(c *CPU) uint32 {
 	d := uint32(i.d)
 	c.G[i.r1] = c.G[i.r2] / d
@@ -781,6 +813,7 @@ func BuildDDFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // DH
 type DH type1
+
 func (i DH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	h := uint32(c.FetchHalfWord(source))
@@ -794,12 +827,13 @@ func BuildDHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // DS
 type DS type2
+
 func (i DS) Execute(c *CPU) uint32 {
-	upper := uint64(c.G[i.r1]) << 32 + uint64(c.G[i.r1 + 1])
+	upper := uint64(c.G[i.r1])<<32 + uint64(c.G[i.r1+1])
 	result := upper / uint64(c.G[i.r2])
 	target := c.computeEffective(i.as, false, 0)
 	c.StoreWord(target, extractUpperWord(result))
-	target = c.computeEffective(i.as + 2, false, 0)
+	target = c.computeEffective(i.as+2, false, 0)
 	c.StoreWord(target, extractLowerWord(result))
 
 	return c.IC + 2
@@ -810,14 +844,15 @@ func BuildDSFunc(op, r1, r2 uint8, as uint16) Instruction {
 
 // DW
 type DW type1
+
 func (i DW) Execute(c *CPU) uint32 {
 	value := uint64(c.G[i.r] << 32)
-	value = value + uint64(c.G[i.r + 1])
+	value = value + uint64(c.G[i.r+1])
 	source := c.computeEffective(i.as, i.i, i.x)
 	dividend := uint64(c.FetchWord(source))
 	result := value / dividend
 	c.G[i.r] = extractUpperWord(result)
-	c.G[i.r + 1] = extractLowerWord(result)
+	c.G[i.r+1] = extractLowerWord(result)
 
 	return c.IC + 2
 }
@@ -827,6 +862,7 @@ func BuildDWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // MD
 type MD type3
+
 func (i MD) Execute(c *CPU) uint32 {
 	c.G[i.r1] = c.G[i.r2] * uint32(i.d)
 	return c.IC + 2
@@ -837,6 +873,7 @@ func BuildMDFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // MH
 type MH type1
+
 func (i MH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	value := uint32(c.FetchHalfWord(source))
@@ -850,12 +887,13 @@ func BuildMHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // MS
 type MS type2
+
 func (i MS) Execute(c *CPU) uint32 {
 	result := uint64(c.G[i.r1]) * uint64(c.G[i.r2])
 	target := c.computeEffective(i.as, false, 0)
 	c.StoreWord(target, extractUpperWord(result))
-	target = c.computeEffective(i.as + 2, false, 0)
-	c.StoreWord(target , extractLowerWord(result))
+	target = c.computeEffective(i.as+2, false, 0)
+	c.StoreWord(target, extractLowerWord(result))
 	return c.IC + 2
 }
 func BuildMSFunc(op, r1, r2 uint8, as uint16) Instruction {
@@ -864,13 +902,14 @@ func BuildMSFunc(op, r1, r2 uint8, as uint16) Instruction {
 
 // MW
 type MW type1
-func(i MW) Execute(c *CPU) uint32 {
+
+func (i MW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	m1 := uint64(c.G[i.r])
 	m2 := uint64(c.FetchWord(source))
 	result := m1 * m2
 	c.G[i.r] = extractUpperWord(result)
-	c.G[i.r + 1] = extractLowerWord(result)
+	c.G[i.r+1] = extractLowerWord(result)
 
 	return c.IC + 2
 }
@@ -880,6 +919,7 @@ func BuildMWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SD
 type SD type3
+
 func (i SD) Execute(c *CPU) uint32 {
 	c.G[i.r1] = c.G[i.r2] - uint32(i.d)
 	c.setCC(1, c.G[i.r1])
@@ -892,19 +932,20 @@ func BuildSDFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // SDW
 type SDW type1
+
 func (i SDW) Execute(c *CPU) uint32 {
-	v1 := uint64(c.G[i.r] << 32) + uint64(c.G[i.r + 1])
+	v1 := uint64(c.G[i.r]<<32) + uint64(c.G[i.r+1])
 	source := c.computeEffective(i.as, i.i, i.x)
 	v2 := uint64(c.FetchWord(source) << 32)
-	source = c.computeEffective(i.as + 2, i.i, i.x)
+	source = c.computeEffective(i.as+2, i.i, i.x)
 	v2 += uint64(c.FetchWord(source))
 
 	result := v1 - v2
 
 	c.G[i.r] = extractUpperWord(result)
-	c.G[i.r + 1] = extractLowerWord(result)
+	c.G[i.r+1] = extractLowerWord(result)
 	if c.G[i.r] == 1 {
-		c.setCC(1, c.G[i.r + 1])
+		c.setCC(1, c.G[i.r+1])
 	} else {
 		c.setCC(1, c.G[i.r])
 	}
@@ -917,6 +958,7 @@ func BuildSDWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SFS
 type SFS type1
+
 func (i SFS) Execute(c *CPU) uint32 {
 	addr := c.computeEffective(i.as, i.i, i.x)
 	result := c.FetchWord(addr) - c.G[i.r]
@@ -931,6 +973,7 @@ func BuildSFSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SH
 type SH type1
+
 func (i SH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	c.G[i.r] = c.G[i.r] - uint32(c.FetchHalfWord(source))
@@ -944,6 +987,7 @@ func BuildSHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SS
 type SS type2
+
 func (i SS) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, false, 0)
 	result := c.G[i.r1] - c.G[i.r2]
@@ -958,6 +1002,7 @@ func BuildSSFunc(op, r1, r2 uint8, as uint16) Instruction {
 
 // SW
 type SW type1
+
 func (i SW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	c.G[i.r] = c.G[i.r] - c.FetchWord(source)
@@ -971,10 +1016,11 @@ func BuildSWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // CLD
 type CLD type3
+
 func (i CLD) Execute(c *CPU) uint32 {
 	x := uint32(i.d)
 	y := c.G[i.r2]
-	c.setCC(2, y - x)
+	c.setCC(2, y-x)
 	return c.IC + 2
 }
 func BuildCLDFunc(op, r1, r2 uint8, d uint16) Instruction {
@@ -983,11 +1029,12 @@ func BuildCLDFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // CLH
 type CLH type1
+
 func (i CLH) Execute(c *CPU) uint32 {
 	x := c.G[i.r]
 	source := c.computeEffective(i.as, i.i, i.x)
 	y := uint32(c.FetchHalfWord(source))
-	c.setCC(2, x - y)
+	c.setCC(2, x-y)
 	return c.IC + 2
 }
 func BuildCLHFunc(op, r, ix uint8, as uint16) Instruction {
@@ -996,11 +1043,12 @@ func BuildCLHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // CLW
 type CLW type1
+
 func (i CLW) Execute(c *CPU) uint32 {
 	x := c.G[i.r]
 	source := c.computeEffective(i.as, i.i, i.x)
 	y := c.FetchWord(source)
-	c.setCC(2, x - y)
+	c.setCC(2, x-y)
 	return c.IC + 2
 }
 func BuildCLWFunc(op, r, ix uint8, as uint16) Instruction {
@@ -1009,6 +1057,7 @@ func BuildCLWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // ND
 type ND type3
+
 func (i ND) Execute(c *CPU) uint32 {
 	d := uint32(i.d)
 	c.G[i.r1] = c.G[i.r2] & d
@@ -1021,6 +1070,7 @@ func BuildNDFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // NH
 type NH type1
+
 func (i NH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	s := uint32(c.FetchHalfWord(source))
@@ -1034,6 +1084,7 @@ func BuildNHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // NS
 type NS type2
+
 func (i NS) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, false, 0)
 	result := c.G[i.r1] & c.G[i.r2]
@@ -1047,6 +1098,7 @@ func BuildNSFunc(op, r1, r2 uint8, as uint16) Instruction {
 
 // NTS
 type NTS type1
+
 func (i NTS) Execute(c *CPU) uint32 {
 	location := c.computeEffective(i.as, i.i, i.x)
 	s := c.FetchWord(location)
@@ -1061,6 +1113,7 @@ func BuildNTSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // NW
 type NW type1
+
 func (i NW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.r)
 	c.G[i.r] = c.G[i.r] & c.FetchWord(source)
@@ -1074,6 +1127,7 @@ func BuildNWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // OD
 type OD type3
+
 func (i OD) Execute(c *CPU) uint32 {
 	d := uint32(i.d)
 	c.G[i.r1] = c.G[i.r2] | d
@@ -1086,6 +1140,7 @@ func BuildODFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // OH
 type OH type1
+
 func (i OH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	s := uint32(c.FetchHalfWord(source))
@@ -1099,6 +1154,7 @@ func BuildOHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // OS
 type OS type2
+
 func (i OS) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, false, 0)
 	result := c.G[i.r1] | c.G[i.r2]
@@ -1112,6 +1168,7 @@ func BuildOSFunc(op, r1, r2 uint8, as uint16) Instruction {
 
 // OTS
 type OTS type1
+
 func (i OTS) Execute(c *CPU) uint32 {
 	location := c.computeEffective(i.as, i.i, i.x)
 	s := c.FetchWord(location)
@@ -1126,6 +1183,7 @@ func BuildOTSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // OW
 type OW type1
+
 func (i OW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.r)
 	c.G[i.r] = c.G[i.r] | c.FetchWord(source)
@@ -1139,6 +1197,7 @@ func BuildOWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // XD
 type XD type3
+
 func (i XD) Execute(c *CPU) uint32 {
 	d := uint32(i.d)
 	c.G[i.r1] = c.G[i.r2] & d
@@ -1151,6 +1210,7 @@ func BuildXDFunc(op, r1, r2 uint8, d uint16) Instruction {
 
 // XH
 type XH type1
+
 func (i XH) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	s := uint32(c.FetchHalfWord(source))
@@ -1164,6 +1224,7 @@ func BuildXHFunc(op, r, ix uint8, as uint16) Instruction {
 
 // XS
 type XS type2
+
 func (i XS) Execute(c *CPU) uint32 {
 	target := c.computeEffective(i.as, false, 0)
 	result := c.G[i.r1] ^ c.G[i.r2]
@@ -1177,6 +1238,7 @@ func BuildXSFunc(op, r1, r2 uint8, as uint16) Instruction {
 
 // XTS
 type XTS type1
+
 func (i XTS) Execute(c *CPU) uint32 {
 	location := c.computeEffective(i.as, i.i, i.x)
 	s := c.FetchWord(location)
@@ -1191,6 +1253,7 @@ func BuildXTSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // XW
 type XW type1
+
 func (i XW) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.r)
 	c.G[i.r] = c.G[i.r] ^ c.FetchWord(source)
@@ -1204,22 +1267,24 @@ func BuildXWFunc(op, r, ix uint8, as uint16) Instruction {
 
 // RLS
 type RLS type1
+
 func (i RLS) Execute(c *CPU) uint32 {
 	r := c.G[i.r]
 	c.G[i.r] = ((r & 0x80000000) >> 31) | ((r & 0x7fffffff) << 1)
 	return c.IC + 2
 }
 func BuildRLSFunc(op, r, ix uint8, as uint16) Instruction {
-	return RLS(buildType1(op,r, ix, as))
+	return RLS(buildType1(op, r, ix, as))
 }
 
 // RLD
 type RLD type1
+
 func (i RLD) Execute(c *CPU) uint32 {
 	r0 := c.G[i.r]
-	r1 := c.G[i.r + 1]
+	r1 := c.G[i.r+1]
 
-	c.G[i.r + 1] = ((r0 & 0x80000000) >> 31) | ((r1 & 0x7fffffff) << 1)
+	c.G[i.r+1] = ((r0 & 0x80000000) >> 31) | ((r1 & 0x7fffffff) << 1)
 	c.G[i.r] = ((r1 & 0x80000000) >> 31) | ((r0 & 0x7fffffff) << 1)
 
 	return c.IC + 2
@@ -1230,6 +1295,7 @@ func BuildRLDFunc(op, r, ix uint8, as uint16) Instruction {
 
 // RRS
 type RRS type1
+
 func (i RRS) Execute(c *CPU) uint32 {
 	r := c.G[i.r]
 	c.G[i.r] = ((r & 1) << 31) | ((r & 0x7fffffff) >> 1)
@@ -1241,12 +1307,13 @@ func BuildRRSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // RRD
 type RRD type1
+
 func (i RRD) Execute(c *CPU) uint32 {
 	r0 := c.G[i.r]
-	r1 := c.G[i.r + 1]
+	r1 := c.G[i.r+1]
 
-	c.G[i.r + 1] = ((r0 & 0x1) << 31) | ((r1 & 0x7fffffff) >> 1)
-	c.G[i.r + 0] = ((r1 & 0x1) << 31) | ((r0 & 0x7fffffff) >> 1)
+	c.G[i.r+1] = ((r0 & 0x1) << 31) | ((r1 & 0x7fffffff) >> 1)
+	c.G[i.r+0] = ((r1 & 0x1) << 31) | ((r0 & 0x7fffffff) >> 1)
 
 	return c.IC + 2
 }
@@ -1256,6 +1323,7 @@ func BuildRRDFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SLA
 type SLA type1
+
 func (i SLA) Execute(c *CPU) uint32 {
 	r := c.G[i.r]
 	c.G[i.r] = (r & 0x80000000) | (((r & 0x7fffffff) << 1) & 0x7fffffff)
@@ -1268,20 +1336,21 @@ func BuildSLAFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SLDA
 type SLDA type1
+
 func (i SLDA) Execute(c *CPU) uint32 {
 	r0 := c.G[i.r]
-	r1 := c.G[i.r + 1]
+	r1 := c.G[i.r+1]
 
 	c.G[i.r] = ((r1 & 0x80000000) >> 31) | ((r0 & 0x7fffffff) << 1)
 	c.G[i.r] = (r1 & 0x7fffffff) << 1
 	if c.G[i.r] == 0 {
-		c.setCC(1, c.G[i.r + 1])
+		c.setCC(1, c.G[i.r+1])
 	} else {
 		c.setCC(1, c.G[i.r])
 	}
 
 	return c.IC + 2
-	
+
 }
 func BuildSLDAFunc(op, r, ix uint8, as uint16) Instruction {
 	return SLDA(buildType1(op, r, ix, as))
@@ -1289,6 +1358,7 @@ func BuildSLDAFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SLL
 type SLL type1
+
 func (i SLL) Execute(c *CPU) uint32 {
 	r := c.G[i.r]
 	c.G[i.r] = r << 1
@@ -1300,11 +1370,12 @@ func BuildSLLFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SLDL
 type SLDL type1
+
 func (i SLDL) Execute(c *CPU) uint32 {
 	r0 := c.G[i.r]
-	r1 := c.G[i.r + 1]
-	c.G[i.r] = ((r0 &0x7fffffff) << 1) | ((r1 & 0x80000000) << 31)
-	c.G[i.r + 1] = ((r1 &0x7fffffff) << 1)
+	r1 := c.G[i.r+1]
+	c.G[i.r] = ((r0 & 0x7fffffff) << 1) | ((r1 & 0x80000000) << 31)
+	c.G[i.r+1] = ((r1 & 0x7fffffff) << 1)
 	return c.IC + 2
 }
 func BuildSLDLFunc(op, r, ix uint8, as uint16) Instruction {
@@ -1313,6 +1384,7 @@ func BuildSLDLFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SRA
 type SRA type1
+
 func (i SRA) Execute(c *CPU) uint32 {
 	r := c.G[i.r]
 	c.G[i.r] = (r & 0x80000000) | (r >> 1)
@@ -1324,12 +1396,13 @@ func BuildSRAFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SRDA
 type SRDA type1
+
 func (i SRDA) Execute(c *CPU) uint32 {
 	r0 := c.G[i.r]
-	r1 := c.G[i.r + 1]
+	r1 := c.G[i.r+1]
 	c.G[i.r] = (r0 & 0x80000000) | (r0 >> 1)
-	c.G[i.r + 1] = ((r0 & 1) << 31) | (r1 >> 1)
-	
+	c.G[i.r+1] = ((r0 & 1) << 31) | (r1 >> 1)
+
 	return c.IC + 2
 }
 func BuildSRDAFunc(op, r, ix uint8, as uint16) Instruction {
@@ -1338,6 +1411,7 @@ func BuildSRDAFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SRL
 type SRL type1
+
 func (i SRL) Execute(c *CPU) uint32 {
 	c.G[i.r] = c.G[i.r] >> 1
 	return c.IC + 2
@@ -1348,12 +1422,13 @@ func BuildSRLFunc(op, r, ix uint8, as uint16) Instruction {
 
 // SRDL
 type SRDL type1
+
 func (i SRDL) Execute(c *CPU) uint32 {
 	r0 := c.G[i.r]
-	r1 := c.G[i.r + 1]
+	r1 := c.G[i.r+1]
 	c.G[i.r] = (r0 >> 1)
-	c.G[i.r + 1] = ((r0 & 1) << 31) | (r1 >> 1)
-	
+	c.G[i.r+1] = ((r0 & 1) << 31) | (r1 >> 1)
+
 	return c.IC + 2
 }
 func BuildSRDLFunc(op, r, ix uint8, as uint16) Instruction {
@@ -1362,10 +1437,12 @@ func BuildSRDLFunc(op, r, ix uint8, as uint16) Instruction {
 
 // CP
 type CP type1
+
 // It is not obvious what PCR is?
 
 // EX
 type EX type1
+
 func (i EX) Execute(c *CPU) uint32 {
 	source := c.computeEffective(i.as, i.i, i.x)
 	value := c.FetchWord(source)
@@ -1377,6 +1454,7 @@ func BuildEXFunc(op, r, ix uint8, as uint16) Instruction {
 
 // JC
 type JC type1
+
 func (i JC) Execute(c *CPU) uint32 {
 	check := c.CC & i.r
 	if check == 0 {
@@ -1390,6 +1468,7 @@ func BuildJCFunc(op, r, ix uint8, as uint16) Instruction {
 
 // JOS
 type JOS type1
+
 func (i JOS) Execute(c *CPU) uint32 {
 	c.G[i.r] -= 1
 	if c.G[i.r] == 0 {
@@ -1403,6 +1482,7 @@ func BuildJOSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // JTS
 type JTS type1
+
 func (i JTS) Execute(c *CPU) uint32 {
 	c.G[i.r] -= 2
 	if c.G[i.r] == 0 {
@@ -1414,9 +1494,9 @@ func BuildJTSFunc(op, r, ix uint8, as uint16) Instruction {
 	return JTS(buildType1(op, r, ix, as))
 }
 
-
 // JOA
 type JOA type1
+
 func (i JOA) Execute(c *CPU) uint32 {
 	c.G[i.r] += 1
 	if c.G[i.r] == 0 {
@@ -1430,6 +1510,7 @@ func BuildJOAFunc(op, r, ix uint8, as uint16) Instruction {
 
 // JS
 type JS type1
+
 func (i JS) Execute(c *CPU) uint32 {
 	c.G[i.r] = c.IC + 2
 	return c.computeEffective(i.as, i.i, i.x)
@@ -1446,6 +1527,7 @@ func BuildJSFunc(op, r, ix uint8, as uint16) Instruction {
 
 // NOP
 type NOP type1
+
 func (i NOP) Execute(c *CPU) uint32 {
 	return c.IC + 2
 }
